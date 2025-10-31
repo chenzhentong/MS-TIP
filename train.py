@@ -11,7 +11,7 @@ from utils import *
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from pypots.optim.adam import Adam
-
+#设置了固定随机种子确保可重复结果、禁用 CUDA 的非确定性优化与 TensorFloat32，从而保证模型可复现
 # Reproducibility
 torch.manual_seed(1729)
 random.seed(1729)
@@ -25,43 +25,43 @@ torch.backends.cudnn.allow_tf32 = False
 parser = argparse.ArgumentParser()
 
 # Model specific parameters
-parser.add_argument('--input_size', type=int, default=2)
-parser.add_argument('--output_size', type=int, default=5)
+parser.add_argument('--input_size', type=int, default=2) #输入特征维度（行人坐标 x, y）
+parser.add_argument('--output_size', type=int, default=5) #输出特征维度，用于多混合高斯建模控制点
 parser.add_argument('--n_epgcn', type=int, default=1,
-                    help='Number of EPGCN layers for endpoint prediction')
-parser.add_argument('--n_epcnn', type=int, default=6,
-                    help='Number of EPCNN layers for endpoint prediction')
+                    help='Number of EPGCN layers for endpoint prediction')#端点预测模块的图卷积神经网络层数，1层足够处理多智能体间交互
+parser.add_argument('--n_epcnn', type=int, default=6, 
+                    help='Number of EPCNN layers for endpoint prediction') #端点预测模块的卷积神经网络层数，6层提供足够的体征提取能力 
 parser.add_argument('--n_trgcn', type=int, default=1,
-                    help='Number of TRGCN layers for trajectory refinement')
+                    help='Number of TRGCN layers for trajectory refinement') #轨迹精炼模块的图卷积神经网络数，1层用于初步轨迹优化
 parser.add_argument('--n_trcnn', type=int, default=3,
-                    help='Number of TRCNN layers for trajectory refinement')
+                    help='Number of TRCNN layers for trajectory refinement')#轨迹精炼模块的卷积神经网络数目，3层实现精细轨迹调整
 parser.add_argument('--n_ways', type=int, default=3,
-                    help='Number of control points for endpoint prediction')
+                    help='Number of control points for endpoint prediction') #端点预测的中间控制点数量
 parser.add_argument('--n_smpl', type=int, default=20,
-                    help='Number of samples for refine')
-parser.add_argument('--kernel_size', type=int, default=3)
+                    help='Number of samples for refine')#精炼阶段采样次数（用于多样化轨迹生成）
+parser.add_argument('--kernel_size', type=int, default=3) #卷积核大小
 
 # Data specifc paremeters
-parser.add_argument('--obs_seq_len', type=int, default=8)
-parser.add_argument('--pred_seq_len', type=int, default=12)
+parser.add_argument('--obs_seq_len', type=int, default=8) #观察序列长度，对应3.2秒的时间窗口
+parser.add_argument('--pred_seq_len', type=int, default=12) #预测序列长度，对应4.8秒的时间窗口
 parser.add_argument('--dataset', default='zara1',
-                    help='Dataset name(eth,hotel,univ,zara1,zara2)')
+                    help='Dataset name(eth,hotel,univ,zara1,zara2)') #数据集 校园开放区域，行人密度适中 / 酒店前院场景，空间相对受限 / 大学校园环境，包含复杂交互模式  商业街环境，高密度人群
 
 # Training specifc parameters
 parser.add_argument('--batch_size', type=int,
-                    default=128, help='Mini batch size')
+                    default=128, help='Mini batch size')  #训练批次大小，每次迭代处理的样本数量
 parser.add_argument('--num_epochs', type=int,
-                    default=512, help='Number of epochs')
+                    default=512, help='Number of epochs') #训练总轮数，模型完整遍历数据集的次数
 parser.add_argument('--clip_grad', type=float,
-                    default=None, help='Gradient clipping')
-parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate')
+                    default=None, help='Gradient clipping')#梯度裁剪阈值，防止梯度爆炸，当梯度范数超过阈值时按比例缩放，保持梯度方向不变
+parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate') #学习率，控制参数更新步长
 parser.add_argument('--lr_sh_rate', type=int, default=128,
-                    help='Number of steps to drop the lr')
+                    help='Number of steps to drop the lr') #学习率下降步数，每128步降低学习率
 parser.add_argument('--use_lrschd', action="store_true",
-                    default=False, help='Use lr rate scheduler')
-parser.add_argument('--tag', default='tag', help='Personal tag for the model')
-parser.add_argument('--nans', default=0.1, type=float, help='Number of nans prior to training')
-parser.add_argument('--saits_lr', default=1e-4, type=float, help='Learning Rate of pre-trained SAITS model')
+                    default=False, help='Use lr rate scheduler')#启用学习率调度器
+parser.add_argument('--tag', default='tag', help='Personal tag for the model') #模型训练标识（用于日志命名等）
+parser.add_argument('--nans', default=0.1, type=float, help='Number of nans prior to training') #缺失值比例（模拟传感器缺失情况），训练前引入10%的NaN值
+parser.add_argument('--saits_lr', default=1e-4, type=float, help='Learning Rate of pre-trained SAITS model')#SAITS（插补模型）微调阶段的学习率，在端到端微调阶段对预训练组件使用独立学习率
 args = parser.parse_args()
 
 plt.figure(figsize=(20,20))
@@ -103,7 +103,7 @@ def plot_grad_flow(named_parameters):
     plt.grid(True)
     plt.savefig(f"img/gradient-hotel")
 
-
+#由于每个场景中的行人数不同，图结构顶点数随时间变化，因此批大小（batch_size）设为 1，以保证每次迭代中模型能正确处理变长输入
 # Data preparation
 # Batch size set to 1 because vertices vary by humans in each scene sequence.
 # Use mini batch working like batch.
@@ -113,7 +113,7 @@ checkpoint_dir = './checkpoint/' + args.tag + '/'
 train_dataset = TrajectoryDataset(
     dataset_path + 'train/', obs_len=args.obs_seq_len, pred_len=args.pred_seq_len, skip=1)
 train_loader = DataLoader(train_dataset, batch_size=1,
-                          shuffle=True, num_workers=0, pin_memory=True)
+                          shuffle=True, num_workers=0, pin_memory=True)#pin_memory=True 以加快 GPU 数据传输，训练阶段启用随机打乱（shuffle=True）
 
 val_dataset = TrajectoryDataset(
     dataset_path + 'val/', obs_len=args.obs_seq_len, pred_len=args.pred_seq_len, skip=1)
@@ -124,22 +124,24 @@ val_loader = DataLoader(val_dataset, batch_size=1,
 model = end_point(n_epgcn=args.n_epgcn, n_epcnn=args.n_epcnn, n_trgcn=args.n_trgcn, n_trcnn=args.n_trcnn,
                    seq_len=args.obs_seq_len, pred_seq_len=args.pred_seq_len, n_ways=args.n_ways, n_smpl=args.n_smpl)
 model = model.to(device)
-saits = create_saits_model(epochs=128)
+saits = create_saits_model(epochs=128) #插补模型（SAITS，Self-Attention-based Imputation Transformer）作为外部预训练模块加载，并与 MS-TIP 模型联合优化,该设计允许端到端训练中同时更新插补模块与预测模块的权重
 all_parameters = list(model.parameters()) + list(saits.model.parameters())
 
 optimizer = torch.optim.SGD(all_parameters, lr=args.lr)
 # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=(1e-5)/2)
 if args.use_lrschd:
     scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, step_size=args.lr_sh_rate, gamma=0.8)
-
+        optimizer, step_size=args.lr_sh_rate, gamma=0.8)#若启用学习率调度器（--use_lrschd），则每训练 128 步后学习率按衰减因子 γ=0.8 自动下降。
+#每次训练运行均自动创建独立的检查点目录（./checkpoint/[tag]/），
+#并保存模型参数与运行配置（通过 pickle 序列化）。
+#这使得不同实验配置（如缺失值比例、学习率策略等）可以独立追踪与复现
 # Train logging
 if not os.path.exists(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 with open(checkpoint_dir + f'args-{args.nans}.pkl', 'wb') as f:
     pickle.dump(args, f)
 
-metrics = {'train_loss': [], 'val_loss': []}
+metrics = {'train_loss': [], 'val_loss': []}#同时定义了训练与验证损失日志容器
 constant_metrics = {'min_val_epoch': -1, 'min_val_loss': 1e10}
 
 
@@ -339,7 +341,7 @@ def get_dataset():
 
         X_saits = torch.cat((X_obs_saits, X_obs_rel_saits), dim=2)
         tensors.append(X_saits)
-    combined_dataset = torch.cat(tensors, dim=0)
+    combined_dataset = torch.cat(tensors, dim=0) #输出统一的时序数据集（含绝对与相对特征）
     return combined_dataset
 
 def pre_train_saits():
@@ -350,24 +352,27 @@ def main():
     import pickle
     global saits
     saits_pkl = f'pre-train/saits-{args.dataset}-tune64-Adam-Scaled.pth'
-
-    if os.path.exists(saits_pkl):
+    #在主训练开始前，首先对 SAITS（Self-Attention-based Imputation Transformer） 模块进行独立预训练，用以学习时序缺失模式的填补能力。
+    if os.path.exists(saits_pkl):#若本地存在预训练权重文件 pre-train/saits-[dataset]-tune64-Adam-Scaled.pth，则直接加载权重
         saits.model.load_state_dict(torch.load(saits_pkl))
     else:
-        pre_train_saits()
-        torch.save(saits.model.state_dict(), saits_pkl)
+        pre_train_saits()#不存在，则调用 pre_train_saits() 函数执行预训练
+        torch.save(saits.model.state_dict(), saits_pkl)#并保存权重文件以便后续重复实验使用
+    #该设计减少了主模型训练的冷启动难度，使轨迹插补模块在初始阶段即可输出稳定的时空估计结果
     print("saits_lr",args.saits_lr)
     print("lr", args.lr)
-    saits.optimizer = Adam(lr = args.saits_lr, weight_decay= args.saits_lr/20)
-    saits.model.train()
+    saits.optimizer = Adam(lr = args.saits_lr, weight_decay= args.saits_lr/20)#SAITS 插补子模块使用独立的 Adam 优化器，学习率为 saits_lr=1×10⁻⁴，并施加权重衰减项 weight_decay=saits_lr/20
+    saits.model.train() 
+    #使预训练模块参数在端到端训练中保持稳定微调，防止梯度爆炸或知识遗忘
+
     # init_params = {}
     
     # for n,p in saits.model.named_parameters():
     #     init_params[n] = p.clone()
-
+    #端到端训练与验证流程（End-to-End Training and Validation Loop）
     for epoch in range(args.num_epochs):
-        train(epoch)
-        train(epoch, args.nans)
+        train(epoch) #执行完整的端到端训练流程
+        train(epoch, args.nans) #模拟不同缺失率条件下的插补与预测
         # curr_params={}
         # for n,p in saits.model.named_parameters():
         #     curr_params[n] = p
@@ -380,23 +385,23 @@ def main():
         # print(curr_params)
         # are_equal = all(torch.equal(init_params[key], curr_params[key]) for key in init_params)
         # assert are_equal
-        valid(epoch)
-        if args.use_lrschd:
+        valid(epoch) #在验证集上计算 ADE/FDE 损失指标
+        if args.use_lrschd:#若启用调度器（--use_lrschd），则每 128 步按比例衰减学习率（γ=0.8）
             scheduler.step()
 
         print(" ")
         print("Dataset: {0}, Epoch: {1}".format(args.tag, epoch))
         print("Train_loss: {0}, Val_los: {1}".format(
-            metrics['train_loss'][-1], metrics['val_loss'][-1]))
+            metrics['train_loss'][-1], metrics['val_loss'][-1])) #每轮训练平均损失、验证集损失
         print("Min_val_epoch: {0}, Min_val_loss: {1}".format(
-            constant_metrics['min_val_epoch'], constant_metrics['min_val_loss']))
+            constant_metrics['min_val_epoch'], constant_metrics['min_val_loss'])) #训练至当前的最优验证损失、对应的最优轮次
         print(" ")
-
+        #所有实验均自动保存至独立的检查点目录 ./checkpoint/[tag]/，不同 tag 值可用于区分多组实验（如不同缺失比例或学习率设置），实验过程支持断点续训与结果复现
         with open(checkpoint_dir + f'metrics-{args.nans}.pkl', 'wb') as f:
-            pickle.dump(metrics, f)
+            pickle.dump(metrics, f) #实验运行参数文件序列化保存
 
         with open(checkpoint_dir + f'constant_metrics-{args.nans}.pkl', 'wb') as f:
-            pickle.dump(constant_metrics, f)
+            pickle.dump(constant_metrics, f)#实验运行训练指标文件序列化保存
 
 
 if __name__ == "__main__":

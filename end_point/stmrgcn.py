@@ -5,14 +5,14 @@ from .normalizer import normalized_adjacency_tilde_matrix
 import torch.nn.functional as Func
 from torch_geometric.nn import HypergraphConv
 from torch.utils.data import Dataset
-
+#快速构建带 ReLU 激活的全连接多层感知机（MLP），在多个子模块中复用，如场景注意力与端点预测模块
 def make_mlp(dim_list):
     layers = []
     for dim_in, dim_out in zip(dim_list[:-1], dim_list[1:]):
         layers.append(nn.Linear(dim_in, dim_out))
         layers.append(nn.ReLU())
     return nn.Sequential(*layers)
-    
+#场景注意力，用于将视觉语义特征（如来自 VGG 或 ResNet 的场景特征图）与行人空间位置信息融合，从而生成时间序列的场景注意力表示 
 class SequentialSceneAttention(nn.Module):
     def __init__(self,attn_L=196,attn_D=512,ATTN_D_DOWN=16,bottleneck_dim=4,embedding_dim=10):
         super(SequentialSceneAttention, self).__init__()
@@ -52,7 +52,7 @@ class SequentialSceneAttention(nn.Module):
 
         sequential_scene_attention = torch.sum(attn_h * attn_w, dim=1)     
         return sequential_scene_attention 
-
+#超图卷积，将行人轨迹特征映射至超图结构上，以建模复杂的多体交互关系。相比传统图卷积，超图能在一个超边内同时连接多个行人，捕获群体级动态模式
 class HyperGraphConv(nn.Module):
     def __init__(self,
                  in_channels,
@@ -111,7 +111,7 @@ class HyperGraphConv(nn.Module):
 
         final_node_feature = final_node_feature.reshape(batches,self.out_channels,obs_len, num_of_peds)
         return final_node_feature.contiguous()
-
+#多关系图卷积，用于轨迹精炼阶段，捕捉多种语义关系（如距离、速度、方向等）的动态邻接结构。不同于 HyperGraphConv 的高阶建模，它采用多关系通道并行卷积实现更高的计算效率
 class MultiRelationalGCN(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, t_kernel_size=1, t_stride=1, t_padding=0, t_dilation=1, bias=True, relation=2):
         super().__init__()
@@ -146,18 +146,18 @@ class MultiRelationalGCN(nn.Module):
         x = x.view(x.size(0), self.relation, self.out_channels, x.size(-2), x.size(-1))
         x = torch.einsum('nrtwv,nrctv->nctw', normalized_adjacency_tilde_matrix(drop_edge(A, 0.8, self.training)), x)
         return x.contiguous(), A
-
+#时空多关系图卷积单元，端点预测阶段的主干单元，结合了超图卷积（空间交互）；场景注意力（环境感知）；时间卷积（动态建模）；残差连接（梯度稳定
 class st_mrgcn(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, use_mdn=True, stride=1, dropout=0, residual=True, relation=2):
         super().__init__()
 
-        assert len(kernel_size) == 2
+        assert len(kernel_size) == 2 #(3,8)
         assert kernel_size[0] % 2 == 1
 
-        padding = ((kernel_size[0] - 1) // 2, 0)
-        self.use_mdn = use_mdn
-        self.relation = relation
-        self.prelu = nn.PReLU()
+        padding = ((kernel_size[0] - 1) // 2, 0) #padding=(1,0) kernel_size=(3,8) 在时间维度上进行对称填充，使得卷积操作不会改变序列长度
+        self.use_mdn = use_mdn #True 在后续阶段启用高斯混合
+        self.relation = relation#4 指示图卷积中多关系边类型（例如：基于距离、方向、速度等多种交互关系）
+        self.prelu = nn.PReLU() #PReLU 作为激活函数，提高非线性表达能力并保持梯度稳定
         self.gcn = HyperGraphConv(in_channels, out_channels)
         self.scene_att=SequentialSceneAttention()
         self.tcn = nn.Sequential(nn.PReLU(),
@@ -193,7 +193,7 @@ class st_mrgcn(nn.Module):
             x = self.prelu(x)
 
         return x
-
+#时空多关系图卷积变体，st_mrgcn_2 结构与上类似，但采用 MultiRelationalGCN 替代 HyperGraphConv，用于轨迹精炼阶段的低阶图结构建模。它在生成阶段主要处理线性插值轨迹的局部动态优化
 class st_mrgcn_2(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, use_mdn=True, stride=1, dropout=0, residual=True, relation=2):
         super().__init__()
@@ -237,7 +237,7 @@ class st_mrgcn_2(nn.Module):
 
         return x, A
 
-
+#端点预测卷积网络，epcnn 用于在端点预测阶段对图卷积输出进行特征聚合与高维映射。它融合 时间方向卷积（T-Conv） 与 通道方向卷积（C-Conv） 两个路径，实现时序和通道的双向信息流
 class epcnn(nn.Module):
     def __init__(self, obs_seq_len, pred_seq_len, in_channels, out_channels, n_tpcn=1, c_ksize=3, n_cpcn=1, t_ksize=3, dropout=0, residual=True):
         super().__init__()
@@ -293,7 +293,7 @@ class epcnn(nn.Module):
 
         return x + res
 
-
+#轨迹精炼卷积网络,trcnn 与 epcnn 结构类似，但输入为完整预测序列（obs + pred）。用于逐时间步调整初始预测轨迹，生成最终平滑轨迹
 class trcnn(nn.Module):
     def __init__(self, total_seq_len, pred_seq_len, in_channels, out_channels, n_tpcn=1, c_ksize=3, n_cpcn=1, t_ksize=3, dropout=0, residual=True):
         super().__init__()

@@ -43,19 +43,19 @@ class end_point(nn.Module):
     def __init__(self, n_epgcn=1, n_epcnn=6, n_trgcn=1, n_trcnn=4, seq_len=8, pred_seq_len=12, n_ways=3, n_smpl=20, hyper_scales = [2,3,5,7,9]):
         super().__init__()
         # Control Point Prediction
-        self.n_epgcn = n_epgcn
-        self.n_epcnn = n_epcnn
-        self.n_smpl = n_smpl
-        self.hyper_scales = hyper_scales
+        self.n_epgcn = n_epgcn #1
+        self.n_epcnn = n_epcnn #6
+        self.n_smpl = n_smpl #20
+        self.hyper_scales = hyper_scales #[2,3,5,7,9]
 
 
         # Trajectory Refinement
-        self.n_trgcn = n_trgcn
-        self.n_trcnn = n_trcnn
+        self.n_trgcn = n_trgcn #1
+        self.n_trcnn = n_trcnn #3
 
         # Observing & Predicting Sequence frames
-        self.obs_seq_len = seq_len
-        self.pred_seq_len = pred_seq_len
+        self.obs_seq_len = seq_len  #8
+        self.pred_seq_len = pred_seq_len #12
 
         # parameters
         input_feat = 6
@@ -65,7 +65,7 @@ class end_point(nn.Module):
         total_seq_len = seq_len + pred_seq_len
         self.gamma = 8
         self.n_gmms = 8
-        self.n_ways = n_ways
+        self.n_ways = n_ways #3
 
         # Control Point Prediction
         self.tp_mrgcns = nn.ModuleList()
@@ -98,8 +98,8 @@ class end_point(nn.Module):
 
         # Generate multi-relational pedestrian graph
         # make adjacency matrix for observed 8 frames
-        A_obs = generate_adjacency_matrix(S_obs).detach()
-        H_obs, W_obs = generate_incidence_matrix(S_obs,self.hyper_scales)
+        A_obs = generate_adjacency_matrix(S_obs).detach() ##基于当前观测生成多关系邻接矩阵
+        H_obs, W_obs = generate_incidence_matrix(S_obs,self.hyper_scales) #为每个时间步生成超图 incidence 与权重
 
         # Graph Control Point Prediction
         V_obs_abs = S_obs[:, 0]
@@ -251,9 +251,8 @@ class end_point(nn.Module):
 
         # Graph Trajectory Refinement
         # make adjacency matrix for predicted 12 frames (will be iteratively change)
-        A_pred = generate_adjacency_matrix(torch.stack([V_pred_abs, V_pred], dim=1))
-        H_pred, W_pred = generate_incidence_matrix(torch.stack([V_pred_abs, V_pred], dim=1),self.hyper_scales)
-
+        A_pred = generate_adjacency_matrix(torch.stack([V_pred_abs, V_pred], dim=1)) 
+        H_pred, W_pred = generate_incidence_matrix(torch.stack([V_pred_abs, V_pred], dim=1),self.hyper_scales) 
         # concatenate to make full 20 frame sequences
         V = torch.cat([V_obs_rept, V_pred], dim=1).detach()
         A = torch.cat([A_obs, A_pred], dim=2).detach()

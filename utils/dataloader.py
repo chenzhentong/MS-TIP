@@ -21,10 +21,10 @@ def poly_fit(traj, traj_len, threshold):
     - int: 1 -> Non Linear 0-> Linear
     """
     t = np.linspace(0, traj_len - 1, traj_len)
-    res_x = np.polyfit(t, traj[0, -traj_len:], 2, full=True)[1]
+    res_x = np.polyfit(t, traj[0, -traj_len:], 2, full=True)[1] ##对每条轨迹执行二次多项式拟合（degree=2），并根据残差误差判断其是否为非线性轨迹
     res_y = np.polyfit(t, traj[1, -traj_len:], 2, full=True)[1]
     if res_x + res_y >= threshold:
-        return 1.0
+        return 1.0 ## 非线性
     else:
         return 0.0
 
@@ -63,11 +63,11 @@ class TrajectoryDataset(Dataset):
 
         self.max_peds_in_frame = 0
         self.data_dir = data_dir
-        self.obs_len = obs_len
-        self.pred_len = pred_len
-        self.skip = skip
-        self.seq_len = self.obs_len + self.pred_len
-        self.delim = delim
+        self.obs_len = obs_len #8
+        self.pred_len = pred_len #12
+        self.skip = skip #1
+        self.seq_len = self.obs_len + self.pred_len  #20
+        self.delim = delim # '\t'
 
         # all_files = sorted(os.listdir(self.data_dir))
         # all_files = [os.path.join(self.data_dir, _path) for _path in all_files]
@@ -82,40 +82,40 @@ class TrajectoryDataset(Dataset):
         for path in all_files:
             print(path)
             data = read_file(path, delim)
-            frames = np.unique(data[:, 0]).tolist()
-            hkl_path = os.path.splitext(path)[0] + ".pkl" 
+            frames = np.unique(data[:, 0]).tolist() #提取第一列的帧数,对每个文件按帧组织数据
+            hkl_path = os.path.splitext(path)[0] + ".pkl"  
             with open(hkl_path, 'rb') as handle:
                 new_fet = pickle.load(handle)
-            fet_map[hkl_path] = torch.from_numpy(new_fet) 
+            fet_map[hkl_path] = torch.from_numpy(new_fet) #每个轨迹文件对应一个同名的 .pkl 文件，其中存储由预训练视觉模型（如 VGG-19）提取的场景语义特征。加载后映射至 fet_map,该特征随后输入至 MS-TIP 模型的 场景注意力模块（Scenic Attention Module），用于融合空间语义与轨迹信息。
             frame_data = []
-            for frame in frames:
-                frame_data.append(data[frame == data[:, 0], :])
+            for frame in frames: #将同一文件中的所有帧按时间顺序组织起来
+                frame_data.append(data[frame == data[:, 0], :]) #循环遍历所有唯一帧ID，按帧组织行人轨迹数据
             num_sequences = int(
-                math.ceil((len(frames) - self.seq_len + 1) / skip))
+                math.ceil((len(frames) - self.seq_len + 1) / skip)) #从连续帧数据中能够生成多少个有效的训练序列样本,skip为步长
 
-            for idx in range(0, num_sequences * self.skip + 1, skip):
+            for idx in range(0, num_sequences * self.skip + 1, skip): #步长 skip 滑动窗口提取连续 seq_len 帧的子序列
                 curr_seq_data = np.concatenate(
-                    frame_data[idx:idx + self.seq_len], axis=0)
-                peds_in_curr_seq = np.unique(curr_seq_data[:, 1])
+                    frame_data[idx:idx + self.seq_len], axis=0) #(85,4)
+                peds_in_curr_seq = np.unique(curr_seq_data[:, 1]) #8
                 self.max_peds_in_frame = max(
-                    self.max_peds_in_frame, len(peds_in_curr_seq))
+                    self.max_peds_in_frame, len(peds_in_curr_seq)) #8
 
-                curr_seq = np.zeros((len(peds_in_curr_seq), 2, self.seq_len))
+                curr_seq = np.zeros((len(peds_in_curr_seq), 2, self.seq_len)) #(8,2,20) #序列中的行人总数，坐标维度，序列长度(时间步长) 存储行人的绝对坐标序列
                 curr_seq_rel = np.zeros(
-                    (len(peds_in_curr_seq), 2, self.seq_len))
+                    (len(peds_in_curr_seq), 2, self.seq_len)) #存储行人的相对位移序列,用于学习速度与方向变化模式
 
                 curr_loss_mask = np.zeros(
-                    (len(peds_in_curr_seq), self.seq_len))
+                    (len(peds_in_curr_seq), self.seq_len)) #(8,20) #损失掩码初始化，负责标记序列中每个行人在各个时间步的有效观测状态
 
                 num_peds_considered = 0
                 _non_linear_ped = []
-                for _, ped_id in enumerate(peds_in_curr_seq):
+                for _, ped_id in enumerate(peds_in_curr_seq): #遍历当前时间窗口中出现的每个行人，提取其轨迹。
                     curr_ped_seq = curr_seq_data[curr_seq_data[:, 1]
-                                                 == ped_id, :]
+                                                 == ped_id, :] #行人id
                     curr_ped_seq = np.around(curr_ped_seq, decimals=4)
                     pad_front = frames.index(curr_ped_seq[0, 0]) - idx
                     pad_end = frames.index(curr_ped_seq[-1, 0]) - idx + 1
-                    if pad_end - pad_front != self.seq_len:
+                    if pad_end - pad_front != self.seq_len: #过滤掉轨迹长度不足 seq_len 的行人（保证完整轨迹）
                         continue
                     curr_ped_seq = np.transpose(curr_ped_seq[:, 2:])
                     # curr_ped_seq = curr_ped_seq
@@ -129,8 +129,8 @@ class TrajectoryDataset(Dataset):
                     curr_seq_rel[_idx, :, pad_front:pad_end] = rel_curr_ped_seq
 
                     # Linear vs Non-Linear Trajectory
-                    _non_linear_ped.append(
-                        poly_fit(curr_ped_seq, pred_len, threshold))
+                    _non_linear_ped.append( 
+                        poly_fit(curr_ped_seq, pred_len, threshold)) #该标注结果（non_linear_ped）在后续损失计算中用于加权处理，使模型在学习曲线运动（如转弯、避让）时更加敏感
                     curr_loss_mask[_idx, pad_front:pad_end] = 1
                     num_peds_considered += 1
 
@@ -181,18 +181,18 @@ class TrajectoryDataset(Dataset):
         for i in range(len(self.seq_start_end)):
             start, end = self.seq_start_end[i]
             s_obs = torch.stack(
-                [self.obs_traj[start:end, :], self.obs_traj_rel[start:end, :]], dim=0).permute(0, 3, 1, 2)
+                [self.obs_traj[start:end, :], self.obs_traj_rel[start:end, :]], dim=0).permute(0, 3, 1, 2)#为支持后续的超图建模，加载器将轨迹序列转换为图结构张量
             self.S_obs.append(s_obs.clone())
             s_trgt = torch.stack(
                 [self.pred_traj[start:end, :], self.pred_traj_rel[start:end, :]], dim=0).permute(0, 3, 1, 2)
-            self.S_trgt.append(s_trgt.clone())
+            self.S_trgt.append(s_trgt.clone())#输出结果 S_obs 与 S_trgt 分别对应观测阶段与预测阶段的图结构输入，每个图节点表示一个行人，边表示同一时间步的空间关系，构成模型中多尺度超图的基础
             pbar.update(1)
         pbar.close()
 
 
-    def saits_loader(self, original_tensor):
+    def saits_loader(self, original_tensor):#为训练插补模块（SAITS）,该机制确保模型能在不完整轨迹输入下学习稳定的插补与预测
         nelems = original_tensor.numel()
-        ne_nan = int(0.20 * nelems)
+        ne_nan = int(0.20 * nelems)#数据加载器随机将 20% 的输入轨迹值替换为 NaN（即模拟传感器遮挡或追踪丢失）
         nan_indices = random.sample(range(nelems), ne_nan)
         new_tensor = original_tensor.clone()
         new_tensor.view(-1)[nan_indices] = float('nan')
@@ -206,11 +206,11 @@ class TrajectoryDataset(Dataset):
         start, end = self.seq_start_end[index]
 
         out = [
-            self.missing_obs_traj[start:end, :], self.missing_pred_traj[start:end, :],
-            self.obs_traj[start:end, :], self.pred_traj[start:end, :],
-            self.obs_traj_rel[start:end, :], self.pred_traj_rel[start:end, :],
-            self.non_linear_ped[start:end], self.loss_mask[start:end, :],
-            self.S_obs[index], self.S_trgt[index],
-            self.fet_map[self.fet_list[index]]
+            self.missing_obs_traj[start:end, :], self.missing_pred_traj[start:end, :], #带缺失值的观测序列（输入给 SAITS）, 带缺失值的预测序列（训练一致性）
+            self.obs_traj[start:end, :], self.pred_traj[start:end, :], #原始观测轨迹，真实未来轨迹
+            self.obs_traj_rel[start:end, :], self.pred_traj_rel[start:end, :],#相对位移序列，预测位移序列
+            self.non_linear_ped[start:end], self.loss_mask[start:end, :],#非线性轨迹标志（0=线性，1=非线性）， 损失掩码，指示有效观测步
+            self.S_obs[index], self.S_trgt[index],#观测阶段的图结构张量，预测阶段的图结构张量
+            self.fet_map[self.fet_list[index]] #场景语义特征（VGG 提取）
         ]
         return out

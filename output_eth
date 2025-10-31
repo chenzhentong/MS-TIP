@@ -1,0 +1,15 @@
+Start evaluation task queues
+Testing eth job 1 pid 13712
+./datasets/eth/test/biwi_eth.txt
+Epoch: ./checkpoint/end_point_eth_experiment/eth0.15_0_best.pth
+Evaluating model: end_point_eth_experiment
+Refined_ADE: 0.75545747, Refined_FDE: 1.11695101
+Epoch: ./checkpoint/end_point_eth_experiment/eth0.15_10_best.pth
+Evaluating model: end_point_eth_experiment
+Refined_ADE: 0.49618163, Refined_FDE: 0.95013200
+Epoch: ./checkpoint/end_point_eth_experiment/eth0.15_111_best.pth
+Evaluating model: end_point_eth_experiment
+Refined_ADE: 0.40303284, Refined_FDE: 0.59332096
+Epoch: ./checkpoint/end_point_eth_experiment/eth0.15_114_best.pth
+Kill evaluation processes
+Done.
